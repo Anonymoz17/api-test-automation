@@ -1,11 +1,13 @@
 """
 Runs a Postman collection through the Newman CLI and stores the report
-in newman-runs/. Backs the `run` subcommand skeleton in src/main.py.
+in newman-runs/. Backs the `run` subcommand in src/main.py.
 """
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from src.config import PROJECT_ROOT
 from src.schema import NewmanConfig, ReporterConfig
@@ -15,6 +17,16 @@ NEWMAN_EXECUTABLE: str  = "newman"
 
 OUTPUT_DIR: Path        = (PROJECT_ROOT / "newman-runs").resolve()
 FILE_EXTENSION: str     = "json"
+
+
+def load_newman_config(config_path: Path) -> NewmanConfig:
+    """Loads a Newman run config (see schema.NewmanConfig) from a JSON file."""
+
+    if config_path.suffix.lower() != f".{FILE_EXTENSION}":
+        raise ValueError(f"Expected a .{FILE_EXTENSION} file, got: {config_path}")
+
+    with open(file=config_path, mode="r", encoding="utf-8") as f:
+        return cast(NewmanConfig, json.load(f))
 
 
 def is_newman_installed() -> bool:
@@ -64,14 +76,14 @@ def build_newman_command(config: NewmanConfig) -> list[str]:
     collection: str | None = config.get("collection")
     environment: str | None = config.get("environment")
 
+    if not collection:
+        raise ValueError("config['collection'] is required")
+
     command: list[str] = [
         "newman",
         "run",
-        config["collection"],
+        collection,
     ]
-
-    if not collection:
-        raise ValueError("config['collection'] is required")
 
     if environment:
         command += [
@@ -82,7 +94,6 @@ def build_newman_command(config: NewmanConfig) -> list[str]:
     command += reporter_args(config=config)
 
     return command
-
 
 
 def run_newman(command: list[str]) -> subprocess.CompletedProcess[str]:

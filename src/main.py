@@ -1,14 +1,21 @@
 import argparse
+import subprocess
+import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from pathlib import Path
 
+from src.newman_cli.newman_orchestrator import (
+    build_newman_command,
+    load_newman_config,
+    run_newman,
+)
 from src.postman_api.export_collections import (
     export_collections,
     resolve_and_fetch_collections,
 )
 from src.postman_api.update_collections import resolve_and_update_collections
 from src.postman_api.workspace import get_all_collections, get_collection_uids
-from src.schema import CollectionResponse
+from src.schema import CollectionResponse, NewmanConfig
 
 
 def _add_workspace_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
@@ -65,23 +72,15 @@ def _add_update_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> Non
 
 
 def _add_run_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
-    # Skeleton: intended to drive Newman runs against exported collections (see newman-runs/).
     run_parser: ArgumentParser = subparsers.add_parser(
         name        = "run",
-        help        = "[not yet implemented] Run a collection with Newman",
-        description = "Run a Postman collection via Newman and store the results in newman-runs/",
+        help        = "Run a Postman collection via Newman using a JSON config file",
+        description = "Reads a Newman run config (collection, environment, reporter) and executes `newman run`",
     )
     _ = run_parser.add_argument(
-        "collection",
+        "config",
         type    = Path,
-        help    = "Path to the collection .json file to run",
-    )
-    _ = run_parser.add_argument(
-        "-e", 
-        "--environment",
-        type    = Path,
-        default = None,
-        help    = "Path to a Postman environment .json file",
+        help    = "Path to a Newman run config .json file (see schema.NewmanConfig)",
     )
     run_parser.set_defaults(func=handle_run)
 
@@ -109,8 +108,17 @@ def handle_update(args: Namespace) -> None:
     _ = resolve_and_update_collections(collections_path=args.path)
 
 
-def handle_run(_args: Namespace) -> None:
-    raise NotImplementedError("The 'run' command (Newman integration) is not implemented yet.")
+def handle_run(args: Namespace) -> None:
+    config: NewmanConfig = load_newman_config(config_path=args.config)
+    command: list[str]   = build_newman_command(config=config)
+
+    result: subprocess.CompletedProcess[str] = run_newman(command=command)
+
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+
+    sys.exit(result.returncode)
 
 
 def build_parser() -> ArgumentParser:
