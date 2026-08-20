@@ -5,13 +5,13 @@ from typing import cast
 import requests
 from requests.models import Response
 
-from src.config import POSTMAN_API_BASE_URL, POSTMAN_API_HEADERS, PROJECT_ROOT
+from src.env import POSTMAN_API_BASE_URL, POSTMAN_API_HEADERS, PROJECT_ROOT
 from src.schema import CollectionResponse
 from src.utils.helper import get_datetime, sanitize
 
-TARGET_URL: str = POSTMAN_API_BASE_URL + "/collections"
+TARGET_URL: str     = POSTMAN_API_BASE_URL + "/collections"
 
-OUTPUT_DIR: Path = (PROJECT_ROOT / "exports").resolve()
+OUTPUT_DIR: Path    = (PROJECT_ROOT / "exports").resolve()
 FILE_EXTENSION: str = "json"
 
 

@@ -10,7 +10,7 @@ from typing import cast
 import requests
 from requests.models import Response
 
-from src.config import POSTMAN_API_BASE_URL, POSTMAN_API_HEADERS
+from src.env import POSTMAN_API_BASE_URL, POSTMAN_API_HEADERS
 from src.schema import JSON, CollectionResponse
 
 FILE_EXTENSION: str = "json"

@@ -3,7 +3,7 @@ from typing import cast
 import requests
 from requests import Response
 
-from src.config import (
+from src.env import (
     POSTMAN_API_BASE_URL,
     POSTMAN_API_HEADERS,
     POSTMAN_API_WORKSPACE_UID,

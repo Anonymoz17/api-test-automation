@@ -3,4 +3,3 @@ env.json
 __pycache__/
 *.pyc
 sheets_service_account.json
-

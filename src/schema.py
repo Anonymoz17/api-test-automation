@@ -26,12 +26,18 @@ class CollectionResponse(TypedDict):
 # === 
 # Newman CLI Config
 
+class GSheetsConfig(TypedDict):
+    spreadsheet_id: str
+    worksheet_id: str
+    handler: str
+
 class ReporterConfig(TypedDict, total=False):
-    json: str
+    json: bool
     progress: bool
 
 class NewmanConfig(TypedDict, total=False):
     collection: Required[str]
     environment: str
+    gsheets: GSheetsConfig
     reporter: ReporterConfig
-
+    tests: str

@@ -1,12 +1,17 @@
 import argparse
+import json
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from pathlib import Path
+from typing import cast
 
+from src.gsheets_integration.gsheets import gsheets_orchestrator
 from src.newman_cli.newman_orchestrator import (
     build_newman_command,
+    inject_test_script,
     load_newman_config,
+    report_path_for,
     run_newman,
 )
 from src.postman_api.export_collections import (
@@ -15,7 +20,7 @@ from src.postman_api.export_collections import (
 )
 from src.postman_api.update_collections import resolve_and_update_collections
 from src.postman_api.workspace import get_all_collections, get_collection_uids
-from src.schema import CollectionResponse, NewmanConfig
+from src.schema import JSON, CollectionResponse, GSheetsConfig, NewmanConfig
 
 
 def _add_workspace_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
@@ -31,7 +36,7 @@ def _add_workspace_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> 
 
     list_parser: ArgumentParser = workspace_subparsers.add_parser(
         "list",
-        help="List all collection UIDs in the workspace",
+        help        = "List all collection UIDs in the workspace",
     )
     list_parser.set_defaults(func=handle_workspace_list)
 
@@ -39,20 +44,20 @@ def _add_workspace_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> 
 def _add_export_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
     export_parser: ArgumentParser = subparsers.add_parser(
         name        = "export",
-        help        ="Export one or more Postman collections to the exports/ directory",
-        description ="Fetches collection(s) from the Postman API and writes them to disk as JSON",
+        help        = "Export one or more Postman collections to the exports/ directory",
+        description = "Fetches collection(s) from the Postman API and writes them to disk as JSON",
     )
     target_group = export_parser.add_mutually_exclusive_group(required=True)
     _ = target_group.add_argument(
         "--uid",
-        nargs="+",
-        metavar="COLLECTION_UID",
-        help="One or more collection UIDs to export",
+        nargs       = "+",
+        metavar     = "COLLECTION_UID",
+        help        = "One or more collection UIDs to export",
     )
     _ = target_group.add_argument(
         "--all",
-        action="store_true",
-        help="Export every collection in the workspace",
+        action      = "store_true",
+        help        = "Export every collection in the workspace",
     )
     export_parser.set_defaults(func=handle_export)
 
@@ -65,8 +70,8 @@ def _add_update_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> Non
     )
     _ = update_parser.add_argument(
         "path",
-        type    = Path,
-        help    = "Path to a single collection .json file or a directory containing collection .json files",
+        type        = Path,
+        help        = "Path to a single collection .json file or a directory containing collection .json files",
     )
     update_parser.set_defaults(func=handle_update)
 
@@ -79,8 +84,8 @@ def _add_run_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
     )
     _ = run_parser.add_argument(
         "config",
-        type    = Path,
-        help    = "Path to a Newman run config .json file (see schema.NewmanConfig)",
+        type        = Path,
+        help        = "Path to a Newman run config .json file (see schema.NewmanConfig)",
     )
     run_parser.set_defaults(func=handle_run)
 
@@ -98,7 +103,7 @@ def handle_export(args: Namespace) -> None:
         collections: CollectionResponse = get_all_collections()
         uids: list[str]                 = get_collection_uids(collections=collections)
     else:
-        uids                            = args.uid
+        uids                 = args.uid
 
     fetched_collections: list[CollectionResponse] = resolve_and_fetch_collections(collection_uids=uids)
     export_collections(fetched_collections=fetched_collections)
@@ -110,14 +115,40 @@ def handle_update(args: Namespace) -> None:
 
 def handle_run(args: Namespace) -> None:
     config: NewmanConfig = load_newman_config(config_path=args.config)
-    command: list[str]   = build_newman_command(config=config)
+    gsheets_config: GSheetsConfig | None = config.get("gsheets")
+    if gsheets_config is not None and not config.get("reporter", {}).get("json"):
+        raise ValueError("config['gsheets'] requires config['reporter']['json'] to be set")
 
-    result: subprocess.CompletedProcess[str] = run_newman(command=command)
+    injected_collection: Path | None = None
+    test_script: str | None = config.get("tests")
+    if test_script:
+        injected_collection = inject_test_script(
+            collection_path=Path(config["collection"]),
+            script_path=Path(test_script),
+        )
+        config = cast(NewmanConfig, {**config, "collection": str(injected_collection)})
+
+    report_path: Path | None = None
+    if config.get("reporter", {}).get("json"):
+        report_path = report_path_for(collection=config["collection"])
+
+    try:
+        command: list[str] = build_newman_command(config=config, report_path=report_path)
+        result: subprocess.CompletedProcess[str] = run_newman(command=command)
+    finally:
+        if injected_collection is not None:
+            injected_collection.unlink(missing_ok=True)
 
     print(result.stdout)
     if result.stderr:
         print(result.stderr, file=sys.stderr)
-
+    if result.returncode == 0 and gsheets_config is not None:
+        assert report_path is not None
+        try:
+            report: JSON = json.loads(report_path.read_text(encoding="utf-8"))
+            gsheets_orchestrator(newman_run_report=report, gsheets=gsheets_config)
+        except Exception as exc:
+            print(f"gsheets update failed: {exc}", file=sys.stderr)
     sys.exit(result.returncode)
 
 
