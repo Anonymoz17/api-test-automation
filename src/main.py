@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
@@ -22,6 +23,7 @@ from src.postman_api.update_collections import resolve_and_update_collections
 from src.postman_api.workspace import get_all_collections, get_collection_uids
 from src.schema import JSON, CollectionResponse, GSheetsConfig, NewmanConfig
 
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def _add_workspace_subcommand(subparsers: _SubParsersAction[ArgumentParser]) -> None:
     workspace_parser: ArgumentParser = subparsers.add_parser(
@@ -126,7 +128,7 @@ def handle_run(args: Namespace) -> None:
             collection_path=Path(config["collection"]),
             script_path=Path(test_script),
         )
-        config = cast(NewmanConfig, {**config, "collection": str(injected_collection)})
+        config = cast(NewmanConfig, cast(object, {**config, "collection": str(injected_collection)}))
 
     report_path: Path | None = None
     if config.get("reporter", {}).get("json"):

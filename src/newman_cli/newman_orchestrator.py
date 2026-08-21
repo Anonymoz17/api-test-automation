@@ -2,8 +2,8 @@
 Runs a Postman collection through the Newman CLI and stores the report
 in newman-runs/. Backs the `run` subcommand in src/main.py.
 """
-
 import json
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -14,20 +14,24 @@ from src.env import PROJECT_ROOT
 from src.schema import JSON, NewmanConfig, ReporterConfig
 from src.utils.helper import get_datetime, sanitize
 
-NEWMAN_EXECUTABLE: str  = "newman"
+logger: logging.Logger = logging.getLogger(__name__)
 
+NEWMAN_EXECUTABLE: str  = "newman"
 OUTPUT_DIR: Path        = (PROJECT_ROOT / "newman_runs").resolve()
 FILE_EXTENSION: str     = "json"
 
 
 def load_newman_config(config_path: Path) -> NewmanConfig:
     """Loads a Newman run config (see schema.NewmanConfig) from a JSON file."""
-
     if config_path.suffix.lower() != f".{FILE_EXTENSION}":
         raise ValueError(f"Expected a .{FILE_EXTENSION} file, got: {config_path}")
 
+    logger.info("Loading Newman config from %s", config_path)
     with open(file=config_path, mode="r", encoding="utf-8") as f:
-        return cast(NewmanConfig, json.load(f))
+        config: NewmanConfig = cast(NewmanConfig, json.load(f))
+
+    logger.debug("Loaded config: %s", config)
+    return config
 
 
 def inject_test_script(collection_path: Path, script_path: Path) -> Path:
@@ -39,10 +43,15 @@ def inject_test_script(collection_path: Path, script_path: Path) -> Path:
     """
     if not script_path.is_file():
         raise FileNotFoundError(f"Test script not found: {script_path}")
+
+    logger.info("Injecting test script %s into %s", script_path, collection_path)
+
     with open(file=collection_path, mode="r", encoding="utf-8") as f:
         collection: dict[str, JSON] = cast(dict[str, JSON], json.load(f))
+
     postman_collection: dict[str, JSON] = cast(dict[str, JSON], collection["collection"])
     script_lines: list[str] = script_path.read_text(encoding="utf-8").splitlines()
+
     test_event: dict[str, JSON] = {
         "listen": "test",
         "script": {
@@ -50,6 +59,7 @@ def inject_test_script(collection_path: Path, script_path: Path) -> Path:
             "exec": cast(JSON, script_lines),
         },
     }
+
     existing_events: list[JSON] = cast(list[JSON], postman_collection.get("event", []))
     remaining_events: list[JSON] = [
         event for event in existing_events
@@ -60,14 +70,16 @@ def inject_test_script(collection_path: Path, script_path: Path) -> Path:
 
     output_name: str = generate_run_filename(collection_path=collection_path, kind="test")
     output_path: Path = Path(tempfile.gettempdir()) / f"{output_name}.{FILE_EXTENSION}"
+
     with open(file=output_path, mode="w", encoding="utf-8") as f:
         json.dump(obj=collection, fp=f, indent=4)
+
+    logger.info("Wrote instrumented collection to %s", output_path)
     return output_path
 
 
 def is_newman_installed() -> bool:
     """Checks that the `newman` executable is reachable on PATH."""
-
     return shutil.which(NEWMAN_EXECUTABLE) is not None
 
 
@@ -89,13 +101,16 @@ def report_path_for(collection: str) -> Path:
     name: str = generate_run_filename(collection_path=Path(collection), kind="run")
     return OUTPUT_DIR / f"{name}.{FILE_EXTENSION}"
 
+
 def reporter_args(config: NewmanConfig, report_path: Path | None) -> list[str]:
     args: list[str] = ["--reporters"]
     reporter_types: list[str] = ["cli"]
     reporter: ReporterConfig | None = config.get("reporter")
+
     if not reporter:
         args.append(reporter_types[0])
         return args
+
     if reporter.get("json"):
         if report_path is None:
             raise ValueError("report_path is required when reporter['json'] is true")
@@ -105,6 +120,7 @@ def reporter_args(config: NewmanConfig, report_path: Path | None) -> list[str]:
             str(report_path),
         ]
         reporter_types += ["json"]
+
     args.insert(1, ",".join(reporter_types))
     return args
 
@@ -112,25 +128,29 @@ def reporter_args(config: NewmanConfig, report_path: Path | None) -> list[str]:
 def build_newman_command(config: NewmanConfig, report_path: Path | None = None) -> list[str]:
     collection: str | None = config.get("collection")
     environment: str | None = config.get("environment")
+
     if not collection:
         raise ValueError("config['collection'] is required")
+
     command: list[str] = ["newman", "run", collection]
     if environment:
         command += ["-e", environment]
     command += reporter_args(config=config, report_path=report_path)
+
+    logger.debug("Built newman command: %s", " ".join(command))
     return command
 
 
 def run_newman(command: list[str]) -> subprocess.CompletedProcess[str]:
     """Executes the assembled newman command."""
-
     if not is_newman_installed():
         raise FileNotFoundError(
             f"'{NEWMAN_EXECUTABLE}' not found on PATH; is Newman installed?"
         )
 
+    logger.info("Running: %s", " ".join(command))
     try:
-        return subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             command,
             capture_output=True,
             text=True,
@@ -138,6 +158,15 @@ def run_newman(command: list[str]) -> subprocess.CompletedProcess[str]:
         )
     except OSError as exc:
         raise RuntimeError(f"Failed to execute newman command: {command!r}") from exc
+
+    if result.returncode == 0:
+        logger.info("Newman run completed successfully (exit code 0)")
+    else:
+        logger.warning("Newman run exited with code %d", result.returncode)
+        if result.stderr:
+            logger.warning("Newman stderr: %s", result.stderr.strip())
+
+    return result
 
 
 def main() -> None:

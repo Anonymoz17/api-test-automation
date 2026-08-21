@@ -34,7 +34,7 @@ def gsheets_orchestrator(newman_run_report: JSON, gsheets: GSheetsConfig) -> Non
 
     handler_path: str           = gsheets.get("handler")
     handler: ModuleType         = import_module(name=handler_path)
-    handler.update(newman_run_report=newman_run_report, spreadsheet=spreadsheet, worksheet=worksheet)
+    handler.update(newman_run_report=newman_run_report, _spreadsheet=spreadsheet, worksheet=worksheet)
 
 
 def main():
